@@ -7,8 +7,7 @@ edition = "2021"
 
 [dependencies]
 tokio="1.15.0"
-image="0.23.14"
 serde="1.0.132"
-#We use beta actix here to solve actix not liking tokio spawning threads
+uuid = "0.8"
 actix-web = "4.0.0-beta.15"
 reqwest="0.11.8"
