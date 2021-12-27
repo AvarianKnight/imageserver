@@ -19,9 +19,16 @@ struct Url {
 #[get("/external")]
 // We fetch the image ourself so that we don't risk accidentally revealing our users IP
 async fn external_image(
-    url: web::Query<Url>
+    url: web::Query<Url>,
+    config: web::Data<Config>
 ) -> Result<HttpResponse, Error> {
-    let res = reqwest::get(&*url.url).await.unwrap();
+    let url = &url.url;
+    if url.contains(&config.domain) {
+        return Err(ErrorBadRequest(
+            "Can't try to use local images as external.",
+        ));
+    }
+    let res = reqwest::get(&*url).await.unwrap();
 
     // Early return if the status isn't a success, usually means that the target website doesn't exist
     if !res.status().is_success() {
@@ -74,7 +81,7 @@ async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<Htt
 
     let return_data = serde_json::to_string(&ReturnData {
         data: ImageStruct {
-            link: format!("{}/get/{}", config.domain, image_url),
+            link: format!("{}://{}/get/{}", config.protocol, config.domain, image_url),
         },
     })
     .unwrap();
@@ -95,6 +102,7 @@ async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Erro
 #[derive(Deserialize, Clone)]
 struct Config {
     ip: String,
+    protocol: String,
     domain: String,
     port: u16,
 }

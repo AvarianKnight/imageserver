@@ -1,6 +1,8 @@
+# https or http
+protocol="https"
 # the domain or ip to use for returning image urls
-# this should include the protocol, but not have a following slash
-# example: https://example.com 
+# this should **not** include the protocol, and should not have a following slash
+# example: example.com
 domain = ""
 # the port that the server should start on
 port = 3100
