@@ -1,3 +1,4 @@
+use actix_web::http::header::{CacheControl, CacheDirective};
 use actix_web::{
     error::ErrorBadRequest, get, http::header::ContentType, post, web, App, Error, FromRequest,
     HttpRequest, HttpResponse, HttpServer,
@@ -11,28 +12,16 @@ use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
-struct ImageUrl {
-    url: String,
+struct Url {
+    url: String
 }
 
-#[derive(Serialize)]
-struct ImageStruct {
-    link: String,
-}
-
-#[derive(Serialize)]
-struct ReturnData {
-    data: ImageStruct,
-}
-
-#[post("/embed")]
+#[get("/external")]
 // We fetch the image ourself so that we don't risk accidentally revealing our users IP
-async fn embed_image(
-    query: web::Json<ImageUrl>,
-    config: web::Data<Config>,
+async fn external_image(
+    url: web::Query<Url>
 ) -> Result<HttpResponse, Error> {
-    let tgt_url = query.url.clone();
-    let res = reqwest::get(tgt_url).await.unwrap();
+    let res = reqwest::get(&*url.url).await.unwrap();
 
     // Early return if the status isn't a success, usually means that the target website doesn't exist
     if !res.status().is_success() {
@@ -50,24 +39,21 @@ async fn embed_image(
         ));
     }
 
-    let unique_signature = Uuid::new_v4();
-    let kind = infer::get(&data).unwrap();
-    let image_url = format!("{}.{}", unique_signature, kind.extension());
+    let mut builder = HttpResponse::Ok();
+    builder.insert_header(CacheControl(vec![CacheDirective::MaxAge(86400u32)]));
+    builder.content_type(ContentType::png());
 
-    let mut file = fs::File::create(format!("./images/{}", image_url)).unwrap();
+    Ok(builder.body(data))
+}
 
-    file.write_all(&data).unwrap();
+#[derive(Serialize)]
+struct ImageStruct {
+    link: String,
+}
 
-    let return_data = serde_json::to_string(&ReturnData {
-        data: ImageStruct {
-            link: format!("{}/{}", config.domain, image_url),
-        },
-    })
-    .unwrap();
-
-    Ok(HttpResponse::Ok()
-        .content_type(ContentType::json())
-        .body(return_data))
+#[derive(Serialize)]
+struct ReturnData {
+    data: ImageStruct,
 }
 
 #[post("/image")]
@@ -88,7 +74,7 @@ async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<Htt
 
     let return_data = serde_json::to_string(&ReturnData {
         data: ImageStruct {
-            link: format!("{}/{}", config.domain, image_url),
+            link: format!("{}/get/{}", config.domain, image_url),
         },
     })
     .unwrap();
@@ -98,7 +84,7 @@ async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<Htt
         .body(return_data))
 }
 
-#[get("/{image}")]
+#[get("/fetch/{image}")]
 async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
     let image = fs::read(format!("./images/{}", image_name))?;
     Ok(HttpResponse::Ok()
@@ -145,7 +131,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(config_clone.clone())
-            .service(embed_image)
+            .service(external_image)
             .service(upload_image)
             .service(fetch_image)
     })
