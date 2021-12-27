@@ -1,78 +1,114 @@
-use actix_web::{get, post, App, web, HttpResponse, HttpServer, http::header::ContentType, Error};
-use std::fs;
-use std::sync::Mutex;
-use std::collections::HashMap;
-use std::time::{Duration, SystemTime, Instant}; 
+use actix_web::{get, post, App, web, HttpResponse, HttpServer, http::header::ContentType, Error, error::{ErrorBadRequest}, FromRequest, HttpRequest};
 
-use serde::{Deserialize};
+use std::{fs, io::Read};
+use std::io::Write;
+
+use uuid::Uuid;
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct ImageUrl {
     url: String
 }
 
-struct ImageData {
-    last_access: SystemTime,
-    image_data: Vec<u8>
+#[derive(Serialize)]
+struct ImageStruct {
+    link: String
 }
 
-impl ImageData {
-    pub fn new(image: Vec<u8>) -> Self {
-        Self {
-            image_data: image,
-            last_access: SystemTime::now()
-        }
-    }
-
-    fn update_last_access(&mut self) {
-        self.last_access = SystemTime::now()
-    }
+#[derive(Serialize)]
+struct ReturnData {
+    data: ImageStruct
 }
+
 
 #[post("/embed")]
 // We fetch the image ourself so that we don't risk accidentally revealing our users IP
-async fn embed_image(query: web::Json<ImageUrl>) -> Result<HttpResponse, Error> {
+async fn embed_image(query: web::Json<ImageUrl>, config: web::Data<Config>) -> Result<HttpResponse, Error> {
     let tgt_url = query.url.clone();
-    let data = reqwest::get(tgt_url)
-        .await
-        .unwrap()
-        .bytes()
+    let res = reqwest::get(tgt_url)
         .await
         .unwrap();
 
+    // Early return if the status isn't a success, usually means that the target website doesn't exist
+    if !res.status().is_success() {
+        return Err(ErrorBadRequest(format!("Target website returned status code {}.", res.status())))
+    }
+
+    let data = res.bytes()
+        .await
+        .unwrap()
+        .to_vec();
+
+    if !infer::is_image(&data) {
+        return Err(ErrorBadRequest("The target website didn't return an image."))
+    }
+
+    let unique_signature = Uuid::new_v4();
+    let kind = infer::get(&data).unwrap();
+    let image_url = format!("{}.{}", unique_signature, kind.extension());
+
+    let mut file = fs::File::create(format!("./images/{}", image_url)).unwrap();
+
+    file.write_all(&data).unwrap();
+    
+    let return_data = serde_json::to_string(&ReturnData {
+        data: ImageStruct {
+            link: format!("{}/{}", config.domain, image_url),
+        }
+    }).unwrap();
+
     Ok(HttpResponse::Ok()
-        .content_type(ContentType::png())
-        .body(data))
+        .content_type(ContentType::json())
+        .body(return_data)
+    )
+}
+
+#[post("/image")]
+async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<HttpResponse, Error> {
+    let data = web::Bytes::extract(&req)
+        .await?
+        .to_vec();
+
+    if !infer::is_image(&data) {
+        return Err(ErrorBadRequest("The provided data wasn't an image."))
+    }
+
+    let unique_signature = Uuid::new_v4();
+    let kind = infer::get(&data).unwrap();
+    let image_url = format!("{}.{}", unique_signature, kind.extension());
+
+    let mut file = fs::File::create(format!("./images/{}", image_url)).unwrap();
+
+    file.write_all(&data).unwrap();
+
+    let return_data = serde_json::to_string(&ReturnData {
+        data: ImageStruct {
+            link: format!("{}/{}", config.domain, image_url),
+        }
+    }).unwrap();
+
+    Ok(HttpResponse::Ok()
+        .content_type(ContentType::json())
+        .body(return_data)
+    )
 }
 
 #[get("/{image}")]
-async fn fetch_image(image_name: web::Path<String>, data: web::Data<Mutex<HashMap<String, ImageData>>>) -> Result<HttpResponse, Error> {
-    let time = Instant::now();
-    let mut data = data.lock().unwrap();
-    let image_data = data.get_mut(&*image_name);
+async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
+    let image = fs::read(format!("./images/{}", image_name))?;
+    Ok(HttpResponse::Ok()
+        .content_type(ContentType::png())
+        .body(image))
+}
 
-    if image_data.is_some() {
-        println!("We already have that image!");
-        let hash_data = image_data.unwrap();
-        let image = hash_data.image_data.clone();
+#[derive(Deserialize, Clone)]
+struct Config {
+    ip: String,
+    domain: String,
+    port: u16,
 
-        // hash_data.update_last_access();
-
-        println!("Took {:0.2?} to complete the request", time.elapsed());
-
-        Ok(HttpResponse::Ok()
-            .content_type(ContentType::png())
-            .body(image))
-    } else {
-        println!("We don't have that image in the cache, fetching and caching.");
-        let image = fs::read(format!("./images/{}", image_name))?;
-        data.insert(image_name.clone(), ImageData::new(image.clone()));
-
-        println!("Took {:0.2?} to complete the request", time.elapsed());
-        Ok(HttpResponse::Ok()
-            .content_type(ContentType::png())
-            .body(image))
-    }
 }
 
 #[actix_web::main]
@@ -80,27 +116,32 @@ async fn main() -> std::io::Result<()> {
     match fs::create_dir("./images") {
         Ok(ok) => ok,
         Err(err) => {
-            // We don't want to completely error out just because the file already exists
+            // We don't want to completely error out just because the file already exists, this would be expected behaviour.
             if err.kind() != std::io::ErrorKind::AlreadyExists {
-                panic!("Failed to create image directory with the following reason: {}", err)
+                panic!("Failed to create image directory with the following error: {}", err)
             }
         }
     };
 
-    // Cache image data so we don't have to do constant file reads
-    // These caches should be cleared 12hrs after last access
+    let mut config_file = String::new();
+    match fs::File::open("./config.toml") {
+        Ok(mut file) => {
+            file.read_to_string(&mut config_file).unwrap();
+        },
+        Err(err) => panic!("Failed to read the config.toml with the following error: {}", err),
+    }
 
-    let data: web::Data<Mutex<HashMap<String, ImageData>>> = web::Data::new(Mutex::new(HashMap::new()));
-
-    let moveable_data = data.clone();
+    let config: Config = toml::from_str(config_file.as_str()).unwrap();
+    let config_clone = web::Data::new(config.clone());
 
     HttpServer::new(move || {
         App::new()
-            .app_data(moveable_data.clone())
+            .app_data(config_clone.clone())
             .service(embed_image)
+            .service(upload_image)
             .service(fetch_image)
     })
-    .bind(("0.0.0.0", 3000))?
+    .bind((config.ip, config.port))?
     .run()
     .await
 }
