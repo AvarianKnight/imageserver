@@ -1,110 +1,21 @@
-use actix_web::http::header::{CacheControl, CacheDirective};
 use actix_web::{
-    error::ErrorBadRequest, get, http::header::ContentType, post, web, App, Error, FromRequest,
-    HttpRequest, HttpResponse, HttpServer,
+    web, App, HttpServer, error, HttpResponse,
 };
 
-use std::io::Write;
 use std::{fs, io::Read};
 
-use uuid::Uuid;
+use serde::{Deserialize};
 
-use serde::{Deserialize, Serialize};
+mod version1;
 
-#[derive(Deserialize)]
-struct Url {
-    url: String
-}
-
-#[get("/1/embed")]
-// We fetch the image ourself so that we don't risk accidentally revealing our users IP
-async fn embed_external(
-    url: web::Query<Url>,
-    config: web::Data<Config>
-) -> Result<HttpResponse, Error> {
-    let url = &url.url;
-    if url.contains(&config.domain) {
-        return Err(ErrorBadRequest(
-            "Can't try to use local images as external.",
-        ));
-    }
-    let res = reqwest::get(url).await.unwrap();
-
-    // Early return if the status isn't a success, usually means that the target website doesn't exist
-    if !res.status().is_success() {
-        return Err(ErrorBadRequest(format!(
-            "Target website returned status code {}.",
-            res.status()
-        )));
-    }
-
-    let data = res.bytes().await.unwrap().to_vec();
-
-    if !infer::is_image(&data) {
-        return Err(ErrorBadRequest(
-            "The target website didn't return an image.",
-        ));
-    }
-
-    let mut builder = HttpResponse::Ok();
-    builder.insert_header(CacheControl(vec![CacheDirective::MaxAge(86400u32)]));
-    builder.content_type(ContentType::png());
-
-    Ok(builder.body(data))
-}
-
-#[derive(Serialize)]
-struct ImageStruct {
-    link: String,
-}
-
-#[derive(Serialize)]
-struct ReturnData {
-    data: ImageStruct,
-}
-
-#[post("/1/image")]
-async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<HttpResponse, Error> {
-    let data = web::Bytes::extract(&req).await?.to_vec();
-
-    if !infer::is_image(&data) {
-        return Err(ErrorBadRequest("The provided data wasn't an image."));
-    }
-
-    let unique_signature = Uuid::new_v4();
-    let kind = infer::get(&data).unwrap();
-    let image_url = format!("{}.{}", unique_signature, kind.extension());
-
-    let mut file = fs::File::create(format!("./images/{}", image_url)).unwrap();
-
-    file.write_all(&data).unwrap();
-
-    let return_data = serde_json::to_string(&ReturnData {
-        data: ImageStruct {
-            link: format!("{}://{}/get/{}", config.protocol, config.domain, image_url),
-        },
-    })
-    .unwrap();
-
-    Ok(HttpResponse::Ok()
-        .content_type(ContentType::json())
-        .body(return_data))
-}
-
-#[get("/1/image/{image}")]
-async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
-    let image = fs::read(format!("./images/{}", image_name))?;
-    Ok(HttpResponse::Ok()
-        .content_type(ContentType::png())
-        .body(image))
-}
 
 #[derive(Deserialize, Clone)]
-struct Config {
+pub struct Config {
     ip: String,
     protocol: String,
     domain: String,
     port: u16,
+    max_image_size: usize
 }
 
 #[actix_web::main]
@@ -134,14 +45,34 @@ async fn main() -> std::io::Result<()> {
     }
 
     let config: Config = toml::from_str(config_file.as_str()).unwrap();
-    let config_clone = web::Data::new(config.clone());
+    let movable_config: Config = config.clone();
 
+    
     HttpServer::new(move || {
+        let config_clone = web::Data::new(movable_config.clone());
+    
+        let image_config = web::JsonConfig::default()
+            .limit(movable_config.max_image_size /  1024)
+            .error_handler(|err, _req| {
+                // create custom error response
+                error::InternalError::from_response(err, HttpResponse::Conflict().finish()).into()
+            });
+
         App::new()
-            .app_data(config_clone.clone())
-            .service(embed_external)
-            .service(upload_image)
-            .service(fetch_image)
+            .app_data(config_clone)
+            .service(
+                web::scope("/v1")
+                    .service(version1::embed_external)
+                    .service(
+                web::scope("/image")
+                            .app_data(image_config)
+                            .route("", web::post().to(version1::upload_image))
+                            
+                            .route("/{image_name}", web::get().to(version1::fetch_image))
+                    )
+                    
+            )
+
     })
     .bind((config.ip, config.port))?
     .run()

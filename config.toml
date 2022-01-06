@@ -9,3 +9,5 @@ port = 3100
 # the ip to run the server behind
 # NOTE: It's better to leave this as 127.0.0.1 and put a proxy in front of the application and rewrite to 127.0.0.1:3000
 ip = "127.0.0.1"
+# the max image size to allow in kilobytes
+max_image_size = 10240
