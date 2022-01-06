@@ -16,9 +16,9 @@ struct Url {
     url: String
 }
 
-#[get("/external")]
+#[get("/1/embed")]
 // We fetch the image ourself so that we don't risk accidentally revealing our users IP
-async fn external_image(
+async fn embed_external(
     url: web::Query<Url>,
     config: web::Data<Config>
 ) -> Result<HttpResponse, Error> {
@@ -28,7 +28,7 @@ async fn external_image(
             "Can't try to use local images as external.",
         ));
     }
-    let res = reqwest::get(&*url).await.unwrap();
+    let res = reqwest::get(url).await.unwrap();
 
     // Early return if the status isn't a success, usually means that the target website doesn't exist
     if !res.status().is_success() {
@@ -63,7 +63,7 @@ struct ReturnData {
     data: ImageStruct,
 }
 
-#[post("/image")]
+#[post("/1/image")]
 async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<HttpResponse, Error> {
     let data = web::Bytes::extract(&req).await?.to_vec();
 
@@ -91,7 +91,7 @@ async fn upload_image(req: HttpRequest, config: web::Data<Config>) -> Result<Htt
         .body(return_data))
 }
 
-#[get("/fetch/{image}")]
+#[get("/1/image/{image}")]
 async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
     let image = fs::read(format!("./images/{}", image_name))?;
     Ok(HttpResponse::Ok()
@@ -139,7 +139,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(config_clone.clone())
-            .service(external_image)
+            .service(embed_external)
             .service(upload_image)
             .service(fetch_image)
     })

@@ -1,4 +1,4 @@
-# https or http
+# http or https
 protocol="https"
 # the domain or ip to use for returning image urls
 # this should **not** include the protocol, and should not have a following slash
