@@ -34,7 +34,11 @@ async fn embed_external(
         ));
     }
 
-    let res = reqwest::get(url).await.unwrap();
+    let res = reqwest::get(url).await;
+    if res.is_err() {
+        return Err(ErrorBadRequest("The specified website failed to respond."));
+    }
+    let res = res.unwrap();
     // Early return if the status isn't a success, usually means that the target website doesn't exist
     if !res.status().is_success() {
         return Err(ErrorBadRequest(format!(
