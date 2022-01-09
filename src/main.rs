@@ -64,7 +64,7 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/v1")
                     .service(version1::embed_external)
                     .service(
-                web::scope("/image")
+                        web::scope("/image")
                             .app_data(image_config)
                             .route("", web::post().to(version1::upload_image))
                             

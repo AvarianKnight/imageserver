@@ -1,4 +1,5 @@
-use actix_web::http::header::{CacheControl, CacheDirective};
+use actix_web::error::{ErrorInternalServerError};
+use actix_web::http::header::{CacheControl, CacheDirective, ContentType};
 use actix_web::{
     error::ErrorBadRequest, get, web, Error, HttpResponse,
 };
@@ -32,8 +33,8 @@ async fn embed_external(
             "Can't try to use local images as external.",
         ));
     }
-    let res = reqwest::get(url).await.unwrap();
 
+    let res = reqwest::get(url).await.unwrap();
     // Early return if the status isn't a success, usually means that the target website doesn't exist
     if !res.status().is_success() {
         return Err(ErrorBadRequest(format!(
@@ -51,8 +52,8 @@ async fn embed_external(
     }
 
     let mut builder = HttpResponse::Ok();
-    builder.set(CacheControl(vec![CacheDirective::MaxAge(86400u32)]));
-    builder.content_type("image/png");
+    builder.insert_header(CacheControl(vec![CacheDirective::MaxAge(86400u32)]));
+    builder.content_type(ContentType::png());
 
     Ok(builder.body(data))
 }
@@ -87,25 +88,30 @@ pub async fn upload_image(mut payload: Multipart, config: web::Data<Config>) -> 
     let kind = infer::get(&data).unwrap();
     let image_url = format!("{}.{}", unique_signature, kind.extension());
 
-    let mut file = fs::File::create(format!("./images/{}", image_url)).unwrap();
+    // This shouldn't ever error, but if it does it will unwrap into the handler
+    match fs::File::create(format!("./images/{}", image_url)) {
+        Ok(mut file) => {
+            file.write_all(&data).unwrap();
+            let return_data = serde_json::to_string(&ReturnData {
+                data: ImageStruct {
+                    link: format!("{}://{}/v1/image/{}", config.protocol, config.domain, image_url),
+                },
+            })
+            .unwrap();
 
-    file.write_all(&data).unwrap();
-
-    let return_data = serde_json::to_string(&ReturnData {
-        data: ImageStruct {
-            link: format!("{}://{}/v1/image/{}", config.protocol, config.domain, image_url),
+            Ok(HttpResponse::Ok()
+                .content_type(ContentType::png())
+                .body(return_data))
         },
-    })
-    .unwrap();
-
-    Ok(HttpResponse::Ok()
-        .content_type("application/json")
-        .body(return_data))
+        Err(_) => {
+            Err(ErrorInternalServerError("Server failed to make file"))
+        },
+    }
 }
 
 pub async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
     let image = fs::read(format!("./images/{}", image_name))?;
     Ok(HttpResponse::Ok()
-        .content_type("image/png")
+        .content_type(ContentType::png())
         .body(image))
 }
