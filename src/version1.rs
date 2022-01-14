@@ -21,7 +21,7 @@ struct Url {
     url: String
 }
 
-#[get("/v1/embed")]
+#[get("/embed")]
 // We fetch the image ourself so that we don't risk accidentally revealing our users IP
 async fn embed_external(
     url: web::Query<Url>,
@@ -36,6 +36,7 @@ async fn embed_external(
 
     let res = reqwest::get(url).await;
     if res.is_err() {
+        println!("Failed to use url: {}", url);
         return Err(ErrorBadRequest("The specified website failed to respond."));
     }
     let res = res.unwrap();
