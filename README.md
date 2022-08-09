@@ -7,6 +7,7 @@ The apis are as follows
 
 ## GET
 Gets the specific image
+
 https://localhost/v1/images/image.png
 
 Gets an embeded url through the image server and gives it to the client so only the server ip is revealed and not the client ip
@@ -15,5 +16,6 @@ https://localhost/v1/embed?url=https://somescetchywebsite.com/image.png
 
 ## POST
 Uploads an image
+
 https://localhost/v1/images
 
