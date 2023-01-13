@@ -6,12 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-serde="1.0.132"
+serde={version = "1.0.132", features = ["derive"]}
 serde_json="1.0"
 uuid = { version = "0.8", features = ["v4"] }
 toml = "0.5"
 infer = "0.5"
 futures-util = "0.3.19"
-actix-multipart = "0.4.0-beta.12"
-actix-web = "4.0.0-beta.19"
-reqwest="0.11.8"
+actix-multipart = "0.4.0"
+actix-web = {version ="4", features =["rustls"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
