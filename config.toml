@@ -11,3 +11,5 @@ port = 3100
 ip = "127.0.0.1"
 # the max image size to allow in kilobytes
 max_image_size = 10240
+# the max iamge size to allow in kilobytes
+max_audio_size = 20480

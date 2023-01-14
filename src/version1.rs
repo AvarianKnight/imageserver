@@ -1,4 +1,4 @@
-use actix_web::error::{ErrorInternalServerError};
+use actix_web::error::ErrorInternalServerError;
 use actix_web::http::header::{CacheControl, CacheDirective, ContentType};
 use actix_web::{
     error::ErrorBadRequest, get, web, Error, HttpResponse,
@@ -8,7 +8,7 @@ use actix_multipart::Multipart;
 use futures_util::stream::StreamExt as _;
 
 use std::io::Write;
-use std::{fs};
+use std::fs;
 
 use uuid::Uuid;
 
@@ -119,4 +119,53 @@ pub async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, 
     Ok(HttpResponse::Ok()
         .content_type(ContentType::png())
         .body(image))
+}
+
+// TODO: Turn this stuff into a trait to de-duplicate 
+pub async fn upload_audio(mut payload: Multipart, config: web::Data<Config>) -> Result<HttpResponse, Error> {
+    let mut data = Vec::new();
+
+	while let Some(item) = payload.next().await {
+		let mut field = item?;
+		while let Some(chunk) = field.next().await {
+			for byte in chunk?.to_vec() {
+				data.push(byte);
+			}
+		}
+	}
+
+    if !infer::is_audio(&data) {
+        return Err(ErrorBadRequest("The provided data wasn't an audio format."));
+    }
+
+    let unique_signature = Uuid::new_v4();
+    let kind = infer::get(&data).unwrap();
+    let audio_url = format!("{}.{}", unique_signature, kind.extension());
+
+    // This shouldn't ever error, but if it does it will unwrap into the handler
+    match fs::File::create(format!("./audio/{}", audio_url)) {
+        Ok(mut file) => {
+            file.write_all(&data).unwrap();
+            let return_data = serde_json::to_string(&ReturnData {
+                data: ImageStruct {
+                    link: format!("{}://{}/v1/audio/{}", config.protocol, config.domain, audio_url),
+                },
+            })
+            .unwrap();
+
+            Ok(HttpResponse::Ok()
+                .content_type(ContentType::json())
+                .body(return_data))
+        },
+        Err(_) => {
+            Err(ErrorInternalServerError("Server failed to make file"))
+        },
+    }
+}
+
+pub async fn fetch_audio(audio_name: web::Path<String>) -> Result<HttpResponse, Error> {
+    let audio_blob = fs::read(format!("./audio/{}", audio_name))?;
+    Ok(HttpResponse::Ok()
+        .content_type("audio/ogg")
+        .body(audio_blob))
 }
