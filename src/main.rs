@@ -88,7 +88,7 @@ async fn main() -> std::io::Result<()> {
                     web::scope("/audio")
                         .app_data(audio_config)
                         .route("", web::post().to(version1::upload_audio))
-                        .route("/{audio_name}", web::get().to(version1::fetch_audio))
+                        .route("/{audio_name}", web::get().to(version1::fetch_audio)),
                 ),
         )
     })

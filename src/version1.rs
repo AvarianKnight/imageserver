@@ -1,14 +1,12 @@
 use actix_web::error::ErrorInternalServerError;
 use actix_web::http::header::{CacheControl, CacheDirective, ContentType};
-use actix_web::{
-    error::ErrorBadRequest, get, web, Error, HttpResponse,
-};
+use actix_web::{error::ErrorBadRequest, get, web, Error, HttpResponse};
 
 use actix_multipart::Multipart;
 use futures_util::stream::StreamExt as _;
 
-use std::io::Write;
 use std::fs;
+use std::io::Write;
 
 use uuid::Uuid;
 
@@ -18,14 +16,14 @@ use crate::Config;
 
 #[derive(Deserialize)]
 struct Url {
-    url: String
+    url: String,
 }
 
 #[get("/embed")]
 // We fetch the image ourself so that we don't risk accidentally revealing our users IP
 async fn embed_external(
     url: web::Query<Url>,
-    config: web::Data<Config>
+    config: web::Data<Config>,
 ) -> Result<HttpResponse, Error> {
     let url = &url.url;
     if url.contains(&config.domain) {
@@ -73,17 +71,20 @@ struct ReturnData {
     data: ImageStruct,
 }
 
-pub async fn upload_image(mut payload: Multipart, config: web::Data<Config>) -> Result<HttpResponse, Error> {
+pub async fn upload_image(
+    mut payload: Multipart,
+    config: web::Data<Config>,
+) -> Result<HttpResponse, Error> {
     let mut data = Vec::new();
 
-	while let Some(item) = payload.next().await {
-		let mut field = item?;
-		while let Some(chunk) = field.next().await {
-			for byte in chunk?.to_vec() {
-				data.push(byte);
-			}
-		}
-	}
+    while let Some(item) = payload.next().await {
+        let mut field = item?;
+        while let Some(chunk) = field.next().await {
+            for byte in chunk?.to_vec() {
+                data.push(byte);
+            }
+        }
+    }
 
     if !infer::is_image(&data) {
         return Err(ErrorBadRequest("The provided data wasn't an image."));
@@ -99,7 +100,10 @@ pub async fn upload_image(mut payload: Multipart, config: web::Data<Config>) -> 
             file.write_all(&data).unwrap();
             let return_data = serde_json::to_string(&ReturnData {
                 data: ImageStruct {
-                    link: format!("{}://{}/v1/image/{}", config.protocol, config.domain, image_url),
+                    link: format!(
+                        "{}://{}/v1/image/{}",
+                        config.protocol, config.domain, image_url
+                    ),
                 },
             })
             .unwrap();
@@ -107,10 +111,8 @@ pub async fn upload_image(mut payload: Multipart, config: web::Data<Config>) -> 
             Ok(HttpResponse::Ok()
                 .content_type(ContentType::png())
                 .body(return_data))
-        },
-        Err(_) => {
-            Err(ErrorInternalServerError("Server failed to make file"))
-        },
+        }
+        Err(_) => Err(ErrorInternalServerError("Server failed to make file")),
     }
 }
 
@@ -121,18 +123,21 @@ pub async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, 
         .body(image))
 }
 
-// TODO: Turn this stuff into a trait to de-duplicate 
-pub async fn upload_audio(mut payload: Multipart, config: web::Data<Config>) -> Result<HttpResponse, Error> {
+// TODO: Turn this stuff into a trait to de-duplicate
+pub async fn upload_audio(
+    mut payload: Multipart,
+    config: web::Data<Config>,
+) -> Result<HttpResponse, Error> {
     let mut data = Vec::new();
 
-	while let Some(item) = payload.next().await {
-		let mut field = item?;
-		while let Some(chunk) = field.next().await {
-			for byte in chunk?.to_vec() {
-				data.push(byte);
-			}
-		}
-	}
+    while let Some(item) = payload.next().await {
+        let mut field = item?;
+        while let Some(chunk) = field.next().await {
+            for byte in chunk?.to_vec() {
+                data.push(byte);
+            }
+        }
+    }
 
     if !infer::is_audio(&data) {
         return Err(ErrorBadRequest("The provided data wasn't an audio format."));
@@ -148,7 +153,10 @@ pub async fn upload_audio(mut payload: Multipart, config: web::Data<Config>) -> 
             file.write_all(&data).unwrap();
             let return_data = serde_json::to_string(&ReturnData {
                 data: ImageStruct {
-                    link: format!("{}://{}/v1/audio/{}", config.protocol, config.domain, audio_url),
+                    link: format!(
+                        "{}://{}/v1/audio/{}",
+                        config.protocol, config.domain, audio_url
+                    ),
                 },
             })
             .unwrap();
@@ -156,10 +164,8 @@ pub async fn upload_audio(mut payload: Multipart, config: web::Data<Config>) -> 
             Ok(HttpResponse::Ok()
                 .content_type(ContentType::json())
                 .body(return_data))
-        },
-        Err(_) => {
-            Err(ErrorInternalServerError("Server failed to make file"))
-        },
+        }
+        Err(_) => Err(ErrorInternalServerError("Server failed to make file")),
     }
 }
 
