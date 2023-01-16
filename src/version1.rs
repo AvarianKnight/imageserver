@@ -122,7 +122,6 @@ pub async fn upload_image(
 }
 
 pub async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
-    println!("fetched image {}", &image_name);
     let image = fs::read(format!("./images/{}", image_name))?;
     Ok(HttpResponse::Ok()
         .content_type(ContentType::png())
