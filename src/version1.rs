@@ -71,6 +71,11 @@ struct ReturnData {
     data: ImageStruct,
 }
 
+#[derive(Serialize)]
+struct AudioReturnData {
+    url: String,
+}
+
 pub async fn upload_image(
     mut payload: Multipart,
     config: web::Data<Config>,
@@ -117,6 +122,7 @@ pub async fn upload_image(
 }
 
 pub async fn fetch_image(image_name: web::Path<String>) -> Result<HttpResponse, Error> {
+    println!("fetched image {}", &image_name);
     let image = fs::read(format!("./images/{}", image_name))?;
     Ok(HttpResponse::Ok()
         .content_type(ContentType::png())
@@ -139,25 +145,23 @@ pub async fn upload_audio(
         }
     }
 
-    if !infer::is_audio(&data) {
+    let kind = infer::get(&data).unwrap();
+    if kind.mime_type() != "video/webm" {
         return Err(ErrorBadRequest("The provided data wasn't an audio format."));
     }
 
     let unique_signature = Uuid::new_v4();
-    let kind = infer::get(&data).unwrap();
-    let audio_url = format!("{}.{}", unique_signature, kind.extension());
+    let audio_url = format!("{}.{}", unique_signature, "ogg");
 
     // This shouldn't ever error, but if it does it will unwrap into the handler
     match fs::File::create(format!("./audio/{}", audio_url)) {
         Ok(mut file) => {
             file.write_all(&data).unwrap();
-            let return_data = serde_json::to_string(&ReturnData {
-                data: ImageStruct {
-                    link: format!(
-                        "{}://{}/v1/audio/{}",
-                        config.protocol, config.domain, audio_url
-                    ),
-                },
+            let return_data = serde_json::to_string(&AudioReturnData {
+                url: format!(
+                          "{}://{}/v1/audio/{}",
+                          config.protocol, config.domain, audio_url
+                          ),
             })
             .unwrap();
 
